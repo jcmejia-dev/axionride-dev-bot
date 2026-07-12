@@ -6,4 +6,4 @@ dist/
 logs/
 *.log
 coverage/
-
+runtime-data/

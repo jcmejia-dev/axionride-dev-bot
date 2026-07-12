@@ -9,6 +9,7 @@ import { dispatchPreviewOta } from "./github.js";
 import { createDiscordPromptHistory, type PromptHistoryManager } from "./prompt-history.js";
 import { isAuthorized, OtaRequestGuard, validateCodexPrompt, validateOtaMessage, validateReleaseNotes } from "./security.js";
 import { buildSystemStatusEmbed, SystemStatusManager } from "./system-status.js";
+import { AIOperationsController } from "./ai-operations.js";
 
 const unauthorized = "You are not allowed to use AxionRide deployment commands.";
 
@@ -21,6 +22,7 @@ export function createBot(config: Config): Client {
   });
   const systemStatus = new SystemStatusManager(client, config, runner);
   const promptHistory = createDiscordPromptHistory(client, config.DISCORD_PROMPTS_CHANNEL_ID, config.DISCORD_BUILD_STATUS_CHANNEL_ID);
+  const aiOperations = new AIOperationsController(client, config);
   let lastMessage: string | undefined;
 
   for (const event of ["queued", "running", "completed", "failed", "cancelled"] as const) {
@@ -30,6 +32,7 @@ export function createBot(config: Config): Client {
     });
   }
   client.once(Events.ClientReady, async (ready) => {
+    await aiOperations.init();
     await runner.checkStartup();
     console.log(`AxionRide Dev Bot online as ${ready.user.tag}; local runner ${runner.enabled ? (runner.isAvailable ? "available" : "unavailable") : "disabled"}`);
     systemStatus.start();
@@ -43,6 +46,7 @@ export function createBot(config: Config): Client {
         await interaction.reply({ content: unauthorized, ephemeral: true });
         return;
       }
+      if (await aiOperations.handle(interaction)) return;
       await handleCommand(interaction, config, guard, runner, systemStatus, promptHistory, () => lastMessage, (value) => { lastMessage = value; });
     } catch (error) {
       console.error("Command failed", error instanceof Error ? error.message : "unknown error");
@@ -127,7 +131,7 @@ async function handleCommand(
     const snapshot = await systemStatus.refresh();
     await interaction.editReply({ embeds: [buildSystemStatusEmbed(snapshot)] }); return;
   }
-  await interaction.reply({ content: "AxionRide Dev Bot supports `/ota-preview`, `/status`, `/links`, `/codex-task`, `/codex-status`, `/codex-cancel`, `/system-status`, and `/help`. Codex changes remain local for review. Only manual Android preview OTA dispatch is supported; production deployment is disabled.", ephemeral: true });
+  await interaction.reply({ content: "AxionRide Dev Bot supports preview OTA, local Codex, system status, and developer-only `/ai-*` monitoring commands. AI monitoring records data only; it cannot purchase, renew, cancel, or charge anything. Production deployment remains disabled.", ephemeral: true });
 }
 
 function formatTaskStatus(task?: CodexTask): string {

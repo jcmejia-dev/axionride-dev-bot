@@ -61,6 +61,7 @@ Fill `.env` locally; it is ignored by Git. Keep each comma-separated ID list fre
 | `DISCORD_BUILD_STATUS_CHANNEL_ID` | Text channel receiving requested-update embeds. |
 | `DISCORD_CHANGELOG_CHANNEL_ID` | Reserved changelog destination. |
 | `DISCORD_PROMPTS_CHANNEL_ID` | Private owner-and-bot-only channel for redacted full Codex prompt history. |
+| `DISCORD_AI_OPERATIONS_CHANNEL_ID` | Optional private channel for significant AI cost, trial, renewal, expiry, and resolved alerts. |
 | `GITHUB_REPOSITORY_URL` | Public HTTPS repository page shown by `/links`. |
 | `GITHUB_ACTIONS_URL` | Public HTTPS Actions page shown in replies. |
 | `EAS_PROJECT_URL` | Public HTTPS EAS dashboard link. |
@@ -241,3 +242,31 @@ For `changelog`, open **Edit Channel > Integrations > Webhooks**, create a dedic
 `/ota-preview` accepts optional `release_notes` up to 1000 safe characters. These appear as **What changed** in the successful changelog; when omitted, the short OTA message is used. The workflow does not infer or invent features from code. If a safe public EAS project/results URL is configured as the GitHub Actions variable `EAS_PROJECT_URL`, it is included; otherwise that field is omitted.
 
 The `build-status` channel is operational and may include queued, working, success, and failure events. The `changelog` channel is release-facing and receives polished successful Preview OTA entries only. A successful Preview OTA updates the preview channel for testers; it is **not** a public Google Play Store release and adds no production deployment capability.
+
+## 20. AI Operations Monitoring (Milestone 18)
+
+AI Operations is a generic developer-only registry for user-defined providers, agents, tools, usage records, subscriptions, trials, and cost-risk thresholds. It contains no provider-specific business logic. All providers are manual-only in v1. An API-mode agent is labeled **Unknown — API adapter not configured** until a future adapter is explicitly implemented and configured against a real usage/billing API; the bot never invents usage or claims personal subscription telemetry is available.
+
+Data is stored in the ignored local file `runtime-data/ai-operations.json` using a versioned, validated schema and atomic replacement writes. The directory is created automatically. Back up this file if the records matter. Railway's ordinary filesystem may be ephemeral, so attach a persistent Railway volume at `runtime-data` or run this feature locally if restart durability is required. No cloud database is required.
+
+Create a private Discord channel such as `ai-operations`, deny View Channel to `@everyone`, grant it only to the developer and bot, and set `DISCORD_AI_OPERATIONS_CHANNEL_ID`. The bot needs View Channel, Send Messages, and Embed Links. Commands remain ephemeral; this channel receives only significant trial, renewal, expiry, estimated cost, spike/burst, and resolved events. Alert keys and delivery timestamps are persisted to prevent duplicates. Subscription checks run at startup and every six hours, with default reminders seven and one day before trial expiry or renewal.
+
+Available commands:
+
+- `/ai-status`, `/ai-agent-list`, `/ai-usage`, and `/ai-cost-status` show private monitoring summaries.
+- `/ai-agent-add`, `/ai-agent-edit`, `/ai-agent-enable`, `/ai-agent-disable`, and `/ai-agent-remove` manage the generic registry. Removal requires `confirm:true`.
+- `/ai-usage-log` records supplied manual requests, known token counts, and optional estimated cost. Manual estimates are never represented as exact billing.
+- `/ai-subscription-add`, `/ai-subscription-edit`, `/ai-subscription-list`, and `/ai-subscription-remove` manage local monitoring records only. Removal requires `confirm:true` and does not cancel a real subscription.
+
+Example Discord setup flow:
+
+1. Run `/ai-agent-add provider:Example Provider name:Local Coding Agent agent_type:Developer tool data_mode:Manual daily_limit:5 monthly_limit:50`.
+2. Copy the returned eight-character agent ID.
+3. Record known activity with `/ai-usage-log agent_id:<ID> requests:10 estimated_cost:1.25 currency:USD task:Reviewed authentication changes`.
+4. Review it with `/ai-status`, `/ai-usage agent_id:<ID>`, and `/ai-cost-status`.
+5. Add a subscription with `/ai-subscription-add provider:Example Provider tool:Developer Plan plan:Monthly renewal_date:2026-08-01 auto_renew:true expected_charge:20 currency:USD payment_note:GCash Visa ending 1234 reminder_days:7,1`.
+6. Review it with `/ai-subscription-list`; editing or deleting the record never contacts the provider.
+
+Never enter card numbers, CVV, bank details, passwords, API keys, OAuth tokens, or authentication files. Payment method is a harmless note only, such as `GCash Visa ending 1234`; long payment numbers and CVV/bank terms are rejected. Notes are length-validated and accidental token/password patterns are redacted before storage. The bot cannot purchase, renew, cancel, charge, or change a provider account.
+
+Cost protection operates only on recorded data: optional per-agent daily/monthly and provider-monthly estimated spend thresholds, rolling request spikes, and repeated activity bursts. Unknown costs do not trigger cost alerts. Alerts based on manual cost are labeled Estimated. Exact provider billing remains future work and requires a real provider adapter plus separately scoped credentials; no provider credentials were added in this milestone.

@@ -23,6 +23,7 @@ const schema = z.object({
   DISCORD_BUILD_STATUS_CHANNEL_ID: z.string().min(1),
   DISCORD_CHANGELOG_CHANNEL_ID: z.string().optional(),
   DISCORD_PROMPTS_CHANNEL_ID: optionalText,
+  DISCORD_AI_OPERATIONS_CHANNEL_ID: optionalText,
   GITHUB_REPOSITORY_URL: publicUrl,
   GITHUB_ACTIONS_URL: publicUrl,
   EAS_PROJECT_URL: publicUrl,
