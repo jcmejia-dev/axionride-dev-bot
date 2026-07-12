@@ -8,6 +8,8 @@ A small, security-focused Discord bot that can dispatch **Android preview OTA up
 - `/status` displays non-sensitive configuration readiness and the last request known by this process.
 - `/links` provides configured public project links.
 - `/help` explains the preview-only command set.
+- `/codex-task`, `/codex-status`, and `/codex-cancel` manage one explicitly enabled, local-PC Codex task at a time.
+- `/system-status` refreshes and privately displays the AxionRide control-room status.
 - `GET /health` returns `{"status":"ok","service":"axionride-dev-bot"}`.
 
 The bot never runs local shell commands and never accepts a channel, environment, or platform from Discord. Codex cannot automatically post to Discord when a prompt finishes. A GitHub push, pull request workflow, or Actions workflow can post status updates through a Discord webhook instead.
@@ -21,6 +23,9 @@ flowchart LR
   G -->|fixed preview / Android| E[EAS Update]
   G -->|safe status webhook| D[Discord]
   H[Railway health probe] -->|GET /health| B
+  O[Authorized owner] -->|safe scoped task| L[Local bot process]
+  L -->|spawn native codex.exe; no shell| C[Codex in local AxionRide working tree]
+  L -->|edit one message| S[Discord system-status channel]
 ```
 
 ## 3. Local setup
@@ -55,10 +60,22 @@ Fill `.env` locally; it is ignored by Git. Keep each comma-separated ID list fre
 | `DISCORD_ANNOUNCEMENTS_CHANNEL_ID` | Reserved announcements destination. |
 | `DISCORD_BUILD_STATUS_CHANNEL_ID` | Text channel receiving requested-update embeds. |
 | `DISCORD_CHANGELOG_CHANNEL_ID` | Reserved changelog destination. |
+| `DISCORD_PROMPTS_CHANNEL_ID` | Private owner-and-bot-only channel for redacted full Codex prompt history. |
 | `GITHUB_REPOSITORY_URL` | Public HTTPS repository page shown by `/links`. |
 | `GITHUB_ACTIONS_URL` | Public HTTPS Actions page shown in replies. |
 | `EAS_PROJECT_URL` | Public HTTPS EAS dashboard link. |
 | `PORT` | Health server port; Railway supplies this, default `3000`. |
+| `LOCAL_CODEX_RUNNER_ENABLED` | Explicit local-only feature flag; defaults to `false` and must remain false on Railway. |
+| `CODEX_EXECUTABLE` | Absolute path to the native `codex.exe`; command wrappers are rejected. |
+| `AXIONRIDE_REPO_PATH` | Fixed local working tree, normally `C:\Projects\axionride`. |
+| `CODEX_TASK_TIMEOUT_MINUTES` | Hard task timeout, default 45 and maximum 180. |
+| `CODEX_TASK_COOLDOWN_SECONDS` | Per-user queue cooldown, minimum/default 60 seconds. |
+| `DISCORD_SYSTEM_STATUS_CHANNEL_ID` | Dedicated channel containing one edit-in-place control-room message. |
+| `SYSTEM_STATUS_INTERVAL_SECONDS` | Refresh interval; default 60 and minimum 30 seconds. |
+| `SUPABASE_HEALTH_URL` | Optional public provider/health URL without credentials. |
+| `EXPO_STATUS_URL` | Optional public Expo/EAS provider status URL. |
+| `GITHUB_STATUS_URL` | Optional public GitHub provider status URL. |
+| `RAILWAY_HEALTH_URL` | Optional public bot health endpoint. |
 
 Startup validates required values without printing their contents. At least one allowed user ID or role ID is required.
 
@@ -84,7 +101,7 @@ Enable **User Settings > Advanced > Developer Mode**. Right-click a user and cho
 
 ## 7. How to configure Discord channels
 
-With Developer Mode enabled, right-click each channel and choose **Copy Channel ID**. Configure the three channel variables. The bot currently posts OTA request embeds only to `DISCORD_BUILD_STATUS_CHANNEL_ID`; the other two IDs are reserved for safe future announcement features.
+With Developer Mode enabled, right-click each channel and choose **Copy Channel ID**. Configure the channel variables. `DISCORD_BUILD_STATUS_CHANNEL_ID` receives operational task/OTA events, `DISCORD_PROMPTS_CHANNEL_ID` receives private redacted Codex prompt history, and the changelog webhook receives polished successful Preview OTA notes.
 
 ## 8. How to create a fine-grained GitHub token with only the minimum Actions/workflow-dispatch access needed
 
@@ -96,6 +113,7 @@ In the **AxionRide mobile repository** (not this bot repository), open **Setting
 
 - `EXPO_TOKEN` — EAS authentication used by the update step.
 - `DISCORD_WEBHOOK_URL` — webhook for success/failure notifications.
+- `DISCORD_CHANGELOG_WEBHOOK_URL` — optional webhook for successful Preview OTA changelog entries only.
 
 Use GitHub secrets, never workflow text, repository variables, logs, or source code.
 
@@ -117,7 +135,7 @@ Windows Command Prompt (run only when you intentionally want to modify the mobil
 copy C:\Projects\axionride-dev-bot\.github\workflows\preview-ota.yml C:\Projects\axionride\.github\workflows\preview-ota.yml
 ```
 
-The bot setup does **not** execute this command and does not modify the mobile project. The workflow has only `workflow_dispatch`, one `message` input, checkout of `develop`, and fixed `preview` channel/environment plus `android` platform. Confirm the mobile project has a committed npm lockfile because the workflow uses `npm ci`.
+The bot setup does **not** execute this command and does not modify the mobile project. The workflow has only `workflow_dispatch`, a required `message` input and optional `release_notes` input, checkout of `develop`, and fixed `preview` channel/environment plus `android` platform. Confirm the mobile project has a committed npm lockfile because the workflow uses `npm ci`.
 
 ## 12. How to deploy to Railway
 
@@ -128,6 +146,8 @@ The bot setup does **not** execute this command and does not modify the mobile p
 5. Register commands once using the production variables.
 
 Railway must host the process continuously for slash commands and interactions to work. The bot reads `process.env.PORT` through validated configuration.
+
+The local Codex runner must **not** run on Railway. Keep `LOCAL_CODEX_RUNNER_ENABLED=false` there. Run the bot on this Windows PC when you want `/codex-task`; only that local process has access to the configured working tree.
 
 ## 13. How to register slash commands
 
@@ -157,7 +177,8 @@ Remove `DISCORD_GUILD_ID` to register global commands; global propagation can ta
 - [ ] Bot channel permissions are minimal.
 - [ ] Fine-grained PAT is repository-scoped, short-lived, and Actions-only.
 - [ ] Workflow exists in the mobile repository and still has only a `message` input.
-- [ ] GitHub secrets `EXPO_TOKEN` and `DISCORD_WEBHOOK_URL` are configured in the mobile repository.
+- [ ] GitHub secrets `EXPO_TOKEN`, `DISCORD_WEBHOOK_URL`, and optional `DISCORD_CHANGELOG_WEBHOOK_URL` are configured in the mobile repository.
+- [ ] The `prompts` channel is visible only to the owner and bot.
 - [ ] Public button URLs are HTTPS and contain no credentials or signed query strings.
 - [ ] Logs and error reports contain no secrets.
 - [ ] Production workflows are not referenced by this bot.
@@ -167,3 +188,56 @@ In-memory cooldown, dispatch lock, and last-message state reset on restart and a
 ## 16. How to add future commands safely
 
 Keep the authorization guard before all actions, use fixed allow-listed operations, validate every input, make normal replies ephemeral, and expose no arbitrary command, file path, URL, branch, environment, platform, or workflow name. Add tests for authorization, validation, concurrency, payload shape, and redaction. Any future production feature needs a separate threat model, multi-person approval, audit trail, durable locking, and an independently scoped credential; do not extend `/ota-preview` for production.
+
+## 17. Local Codex runner
+
+The runner is opt-in and local-PC-only. It checks the fixed repository directory, Git working tree, and native Codex executable at startup. It never exposes an HTTP execution endpoint. Discord input is written to Codex stdin; it is never interpolated into a command. Codex runs as a separate child with `shell: false`, fixed arguments, `read-only` sandboxing for clear inspection tasks or `workspace-write` for allowed implementation tasks, no dangerous bypass flags, a stripped environment, one-task locking, cooldown, and a timeout. Redacted exit diagnostics are written only to the ignored local file `logs/codex-runner.log`.
+
+This PC has Codex CLI `0.144.1`. `codex.cmd` is installed, but Node 24 cannot spawn that Windows wrapper with `shell: false`. The native executable discovered and successfully tested here is:
+
+```text
+C:\Users\pc\AppData\Roaming\npm\node_modules\@openai\codex\node_modules\@openai\codex-win32-x64\vendor\x86_64-pc-windows-msvc\bin\codex.exe
+```
+
+After Codex updates, rediscover and verify it in Windows Command Prompt:
+
+```cmd
+where codex
+dir /s /b "%APPDATA%\npm\node_modules\@openai\codex\node_modules\@openai\codex-win32-x64\vendor\codex.exe" 2>nul
+codex.cmd --version
+codex.cmd login
+```
+
+Configure the discovered `.exe` path in the ignored `.env`, or enable it for one Command Prompt session without writing secrets:
+
+```cmd
+cd C:\Projects\axionride-dev-bot
+set LOCAL_CODEX_RUNNER_ENABLED=true
+set CODEX_EXECUTABLE=C:\Users\pc\AppData\Roaming\npm\node_modules\@openai\codex\node_modules\@openai\codex-win32-x64\vendor\x86_64-pc-windows-msvc\bin\codex.exe
+set AXIONRIDE_REPO_PATH=C:\Projects\axionride
+set CODEX_TASK_TIMEOUT_MINUTES=45
+set CODEX_TASK_COOLDOWN_SECONDS=60
+npm run dev
+```
+
+The optional `/codex-task branch:` value must match the current local branch. The bot never switches branches. Only explicitly listed user IDs—not role-only authorization—can cancel a task. Filters reject requests for push, destructive Git operations, secrets, EAS update/build, npm publishing, deployment, and similar destructive operations. Every task receives the mandatory final safety instruction. Changes remain uncommitted for human review; run `/ota-preview` manually only after review.
+
+## 18. System-status channel
+
+Create a dedicated Discord text channel named `system-status`, enable Developer Mode, copy its channel ID, and set `DISCORD_SYSTEM_STATUS_CHANNEL_ID`. Give the bot only **View Channel**, **Read Message History**, **Send Messages**, and **Embed Links** there. Read Message History lets it find and reuse its control-room message after restart. It does not need Administrator, Manage Server, Manage Channels, or Manage Messages.
+
+The bot finds its existing **AxionRide Control Room** embed and edits it every 60 seconds by default. Missing optional URLs display Unknown. GitHub Actions lookup reuses the current token only when it already has Actions read access; insufficient access displays Unknown and does not require broader permissions. Public Supabase and Expo checks measure provider/endpoint reachability only—not whether AxionRide works. Configure only public HTTPS URLs without keys, signed parameters, or credentials.
+
+The bot cannot detect or report its own downtime while offline. A future external monitor such as UptimeRobot should poll `/health` and alert Discord independently when the local bot or Railway endpoint is unavailable. The bot enforces a 30-second minimum status interval and defaults to 60 seconds.
+
+## 19. Private prompt history and Preview changelog
+
+Create a Discord text channel named `prompts`. Deny **View Channel** to `@everyone`, then allow it only for your owner account and the AxionRide bot. Give the bot View Channel, Send Messages, Embed Links, and Read Message History. Copy the channel ID into local `.env` as `DISCORD_PROMPTS_CHANNEL_ID`; add the same variable in Railway later only if that bot instance should retain prompt history. Never make this channel public: accepted Codex prompts are stored there after likely tokens, API keys, passwords, and `.env` assignment values are replaced with `[REDACTED]`.
+
+Each accepted `/codex-task` creates one prompt-history embed with task ID, requester, branch, timestamp, full redacted prompt, and Queued state. The same message is edited to Running and then Completed, Failed, or Cancelled with duration and a safe summary. Unauthorized and rejected prompts are not posted. Raw terminal output, authentication files, and environment objects are never sent.
+
+For `changelog`, open **Edit Channel > Integrations > Webhooks**, create a dedicated webhook, and copy its URL directly into the AxionRide mobile repository Actions secret named `DISCORD_CHANGELOG_WEBHOOK_URL`. Do not place the webhook URL in bot source, `.env.example`, or a GitHub variable. The existing `DISCORD_WEBHOOK_URL` remains for build-status success/failure notifications; the changelog webhook runs only after a successful EAS Preview update. If it is missing, the workflow prints a safe skip notice and still succeeds.
+
+`/ota-preview` accepts optional `release_notes` up to 1000 safe characters. These appear as **What changed** in the successful changelog; when omitted, the short OTA message is used. The workflow does not infer or invent features from code. If a safe public EAS project/results URL is configured as the GitHub Actions variable `EAS_PROJECT_URL`, it is included; otherwise that field is omitted.
+
+The `build-status` channel is operational and may include queued, working, success, and failure events. The `changelog` channel is release-facing and receives polished successful Preview OTA entries only. A successful Preview OTA updates the preview channel for testers; it is **not** a public Google Play Store release and adds no production deployment capability.

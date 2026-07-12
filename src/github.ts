@@ -6,11 +6,11 @@ export interface DispatchConfig {
   branch: string;
 }
 
-export function createDispatchPayload(message: string, branch = "develop") {
-  return { ref: branch, inputs: { message } } as const;
+export function createDispatchPayload(message: string, branch = "develop", releaseNotes?: string) {
+  return { ref: branch, inputs: { message, ...(releaseNotes ? { release_notes: releaseNotes } : {}) } } as const;
 }
 
-export async function dispatchPreviewOta(config: DispatchConfig, message: string): Promise<void> {
+export async function dispatchPreviewOta(config: DispatchConfig, message: string, releaseNotes?: string): Promise<void> {
   const url = `https://api.github.com/repos/${encodeURIComponent(config.owner)}/${encodeURIComponent(config.repo)}/actions/workflows/${encodeURIComponent(config.workflowFile)}/dispatches`;
   const response = await fetch(url, {
     method: "POST",
@@ -21,8 +21,7 @@ export async function dispatchPreviewOta(config: DispatchConfig, message: string
       "X-GitHub-Api-Version": "2022-11-28",
       "User-Agent": "axionride-dev-bot",
     },
-    body: JSON.stringify(createDispatchPayload(message, config.branch)),
+    body: JSON.stringify(createDispatchPayload(message, config.branch, releaseNotes)),
   });
   if (!response.ok) throw new Error(`GitHub workflow dispatch failed with status ${response.status}`);
 }
-

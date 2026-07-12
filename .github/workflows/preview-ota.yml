@@ -7,6 +7,10 @@ on:
         description: Safe preview OTA message
         required: true
         type: string
+      release_notes:
+        description: Optional safe preview changelog notes
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -54,3 +58,30 @@ jobs:
           payload=$(jq -n --arg title "$RESULT" --arg message "$OTA_MESSAGE" --arg sha "$COMMIT_SHA" --arg url "$RUN_URL" \
             '{embeds:[{title:$title,color:16742912,fields:[{name:"OTA message",value:$message},{name:"Commit SHA",value:$sha},{name:"GitHub Actions run",value:$url}]}]}')
           curl --fail-with-body --silent --show-error -H "Content-Type: application/json" -d "$payload" "$DISCORD_WEBHOOK_URL"
+
+      - name: Post successful preview changelog
+        if: success()
+        env:
+          DISCORD_CHANGELOG_WEBHOOK_URL: ${{ secrets.DISCORD_CHANGELOG_WEBHOOK_URL }}
+          OTA_MESSAGE: ${{ inputs.message }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EAS_PROJECT_URL: ${{ vars.EAS_PROJECT_URL }}
+        shell: bash
+        run: |
+          if [ -z "$DISCORD_CHANGELOG_WEBHOOK_URL" ]; then
+            echo "DISCORD_CHANGELOG_WEBHOOK_URL is not configured; skipping the optional preview changelog post."
+            exit 0
+          fi
+          notes="$RELEASE_NOTES"
+          if [ -z "$notes" ]; then notes="$OTA_MESSAGE"; fi
+          short_sha="${COMMIT_SHA:0:7}"
+          timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          eas_field='[]'
+          case "$EAS_PROJECT_URL" in
+            https://*) eas_field=$(jq -n --arg url "$EAS_PROJECT_URL" '[{name:"EAS project / update results",value:$url}]') ;;
+          esac
+          payload=$(jq -n --arg message "$OTA_MESSAGE" --arg notes "$notes" --arg sha "$short_sha" --arg url "$RUN_URL" --arg timestamp "$timestamp" --argjson eas "$eas_field" \
+            '{embeds:[{title:"AxionRide Preview Update",description:"Preview OTA for testers — this is not a public Play Store release.",color:16742912,timestamp:$timestamp,fields:([{name:"OTA message",value:$message},{name:"What changed",value:$notes},{name:"Commit",value:$sha,inline:true},{name:"Branch",value:"develop",inline:true},{name:"Platform",value:"Android Preview",inline:true},{name:"GitHub Actions run",value:$url}] + $eas)}]}')
+          curl --fail-with-body --silent --show-error -H "Content-Type: application/json" -d "$payload" "$DISCORD_CHANGELOG_WEBHOOK_URL"

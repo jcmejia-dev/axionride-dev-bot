@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isAuthorized, OtaRequestGuard, validateOtaMessage } from "../src/security.js";
+import { isAuthorized, OtaRequestGuard, validateOtaMessage, validateReleaseNotes } from "../src/security.js";
 import { createDispatchPayload } from "../src/github.js";
 import { buildAxionEmbed, formatSafeStatus } from "../src/embeds.js";
 
@@ -27,6 +27,15 @@ describe("OTA protections", () => {
     expect(createDispatchPayload("Safe release", "develop")).toEqual({ ref: "develop", inputs: { message: "Safe release" } });
     expect(JSON.stringify(createDispatchPayload("Safe release"))).not.toMatch(/channel|environment|platform|production/);
   });
+  it("validates optional release notes and includes no deployment controls", () => {
+    expect(validateReleaseNotes("Improved rider settings and map behavior.")).toBe("Improved rider settings and map behavior.");
+    expect(() => validateReleaseNotes("See https://example.com")).toThrow();
+    expect(() => validateReleaseNotes("bad\nnotes")).toThrow();
+    expect(() => validateReleaseNotes("release; eas update")).toThrow();
+    const payload = createDispatchPayload("Preview update", "develop", "Improved settings");
+    expect(payload).toEqual({ ref: "develop", inputs: { message: "Preview update", release_notes: "Improved settings" } });
+    expect(JSON.stringify(payload)).not.toMatch(/channel|environment|platform|production/);
+  });
 });
 
 it("redacts secrets from safe status and embed output", () => {
@@ -35,4 +44,3 @@ it("redacts secrets from safe status and embed output", () => {
   expect(JSON.stringify({ status, embed })).not.toContain("supersecret");
   expect(JSON.stringify({ status, embed })).not.toContain("hunter2");
 });
-
