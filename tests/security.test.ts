@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isAuthorized, OtaRequestGuard, validateOtaMessage, validateReleaseNotes } from "../src/security.js";
+import { isAuthorized, OtaRequestGuard, validateOtaMessage, validatePreviewBranch, validateReleaseNotes } from "../src/security.js";
 import { createDispatchPayload } from "../src/github.js";
 import { buildAxionEmbed, formatSafeStatus } from "../src/embeds.js";
 
@@ -24,7 +24,7 @@ describe("OTA protections", () => {
     expect(() => guard.acquire("two", 1000)).toThrow(/already being queued/); release();
   });
   it("dispatch payload exposes only a message input and configured ref", () => {
-    expect(createDispatchPayload("Safe release", "develop")).toEqual({ ref: "develop", inputs: { message: "Safe release" } });
+    expect(createDispatchPayload("Safe release", "develop")).toEqual({ ref: "main", inputs: { message: "Safe release", target_branch: "develop" } });
     expect(JSON.stringify(createDispatchPayload("Safe release"))).not.toMatch(/channel|environment|platform|production/);
   });
   it("validates optional release notes and includes no deployment controls", () => {
@@ -33,9 +33,11 @@ describe("OTA protections", () => {
     expect(() => validateReleaseNotes("bad\nnotes")).toThrow();
     expect(() => validateReleaseNotes("release; eas update")).toThrow();
     const payload = createDispatchPayload("Preview update", "develop", "Improved settings");
-    expect(payload).toEqual({ ref: "develop", inputs: { message: "Preview update", release_notes: "Improved settings" } });
+    expect(payload).toEqual({ ref: "main", inputs: { message: "Preview update", release_notes: "Improved settings", target_branch: "develop" } });
     expect(JSON.stringify(payload)).not.toMatch(/channel|environment|platform|production/);
   });
+  it.each(["design/new-home", "feature/maps.v2/test", "fix/login_bug-1"])("accepts safe branch preview name %s", (branch) => expect(validatePreviewBranch(branch)).toBe(branch));
+  it.each(["main", "develop", "production", "release/1.0", "refs/tags/v1", "refs/heads/feature/x", "feature/bad branch", "feature/../../main", "feature/x;whoami", "https://example.com/feature/x", "Feature/Upper"])("rejects unsafe branch preview name %s", (branch) => expect(() => validatePreviewBranch(branch)).toThrow());
 });
 
 it("redacts secrets from safe status and embed output", () => {

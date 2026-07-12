@@ -4,6 +4,10 @@ export const commandData = [
   new SlashCommandBuilder().setName("ota-preview").setDescription("Queue an Android preview OTA update")
     .addStringOption((option) => option.setName("message").setDescription("Safe update message (maximum 120 characters)").setRequired(true).setMaxLength(120))
     .addStringOption((option) => option.setName("release_notes").setDescription("Optional safe changelog notes (maximum 1000 characters)").setRequired(false).setMaxLength(1000)),
+  new SlashCommandBuilder().setName("ota-branch").setDescription("Queue a pushed feature branch to Android Preview")
+    .addStringOption((option) => option.setName("branch").setDescription("design/, feature/, or fix/ remote branch").setRequired(true).setMaxLength(200))
+    .addStringOption((option) => option.setName("message").setDescription("Safe OTA message (maximum 120 characters)").setRequired(true).setMaxLength(120))
+    .addStringOption((option) => option.setName("release_notes").setDescription("Optional safe changelog notes (maximum 1000 characters)").setMaxLength(1000)),
   new SlashCommandBuilder().setName("status").setDescription("Show safe bot and workflow status"),
   new SlashCommandBuilder().setName("links").setDescription("Show AxionRide project links"),
   new SlashCommandBuilder().setName("help").setDescription("Show AxionRide bot help"),

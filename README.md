@@ -5,6 +5,7 @@ A small, security-focused Discord bot that can dispatch **Android preview OTA up
 ## 1. What the bot does
 
 - `/ota-preview message:<text>` dispatches the configured GitHub Actions workflow after authorization, validation, cooldown, and concurrency checks.
+- `/ota-branch branch:<remote branch> message:<text>` publishes a pushed `design/`, `feature/`, or `fix/` branch to the same Android Preview channel for pre-merge testing.
 - `/status` displays non-sensitive configuration readiness and the last request known by this process.
 - `/links` provides configured public project links.
 - `/help` explains the preview-only command set.
@@ -106,7 +107,7 @@ With Developer Mode enabled, right-click each channel and choose **Copy Channel 
 
 ## 8. How to create a fine-grained GitHub token with only the minimum Actions/workflow-dispatch access needed
 
-In GitHub **Settings > Developer settings > Personal access tokens > Fine-grained tokens**, select only the AxionRide mobile repository, choose a short expiration, and grant repository **Actions: Read and write**. Leave all unrelated permissions at no access. Store the token only as `GITHUB_TOKEN` in local/Railway environment variables. Rotate it if exposed. Organization policy may require an administrator to approve the token.
+In GitHub **Settings > Developer settings > Personal access tokens > Fine-grained tokens**, select only the AxionRide mobile repository, choose a short expiration, and grant repository **Actions: Read and write** plus **Contents: Read-only**. Contents read access is used only to verify that `/ota-branch` names an existing pushed remote branch. Leave all unrelated permissions at no access. Store the token only as `GITHUB_TOKEN` in local/Railway environment variables. Rotate it if exposed. Organization policy may require an administrator to approve the token.
 
 ## 9. How to set GitHub repository secrets
 
@@ -136,7 +137,7 @@ Windows Command Prompt (run only when you intentionally want to modify the mobil
 copy C:\Projects\axionride-dev-bot\.github\workflows\preview-ota.yml C:\Projects\axionride\.github\workflows\preview-ota.yml
 ```
 
-The bot setup does **not** execute this command and does not modify the mobile project. The workflow has only `workflow_dispatch`, a required `message` input and optional `release_notes` input, checkout of `develop`, and fixed `preview` channel/environment plus `android` platform. Confirm the mobile project has a committed npm lockfile because the workflow uses `npm ci`.
+The bot setup does **not** execute this command and does not modify the mobile project. The workflow has only `workflow_dispatch`, required `message` and `target_branch` inputs plus optional `release_notes`, validates the target before checkout, and fixes the publish destination to the `preview` channel/environment and Android platform. Confirm the mobile project has a committed npm lockfile because the workflow uses `npm ci`.
 
 ## 12. How to deploy to Railway
 
@@ -270,3 +271,21 @@ Example Discord setup flow:
 Never enter card numbers, CVV, bank details, passwords, API keys, OAuth tokens, or authentication files. Payment method is a harmless note only, such as `GCash Visa ending 1234`; long payment numbers and CVV/bank terms are rejected. Notes are length-validated and accidental token/password patterns are redacted before storage. The bot cannot purchase, renew, cancel, charge, or change a provider account.
 
 Cost protection operates only on recorded data: optional per-agent daily/monthly and provider-monthly estimated spend thresholds, rolling request spikes, and repeated activity bursts. Unknown costs do not trigger cost alerts. Alerts based on manual cost are labeled Estimated. Exact provider billing remains future work and requires a real provider adapter plus separately scoped credentials; no provider credentials were added in this milestone.
+
+## 21. Secure branch-preview OTA
+
+`/ota-preview` remains the normal post-merge command: it dispatches the trusted workflow from `main` and always publishes the `develop` branch to Android Preview. `/ota-branch` is a pre-merge testing command: it dispatches the same trusted `main` workflow while passing one validated, existing remote `design/`, `feature/`, or `fix/` branch as `target_branch`.
+
+The branch must already be committed and pushed to GitHub. The bot checks GitHub before dispatch and does not commit, push, merge, switch, or delete branches. Both commands share the same per-user cooldown and single-dispatch lock. Both use the same message and release-note validation. Neither command builds an APK, changes EAS/Supabase configuration, runs arbitrary shell commands, or publishes production.
+
+Recommended workflow:
+
+1. Commit locally and push a `design/`, `feature/`, or `fix/` branch using your normal reviewed Git workflow.
+2. Run `/ota-branch branch:feature/example message:Test example release_notes:Pre-merge tester build`.
+3. Test the resulting Android Preview OTA.
+4. Open and review a pull request, then merge it into `develop` separately.
+5. Run `/ota-preview message:Reviewed preview update` to publish the merged `develop` result.
+
+Branch previews use the existing Preview channel and are for developer/tester validation only. They are not production releases, Play Store builds, APK builds, merges, or evidence that a branch is approved. The workflow itself independently validates the branch before checkout. The build-status and changelog embeds include the branch and actual checked-out commit SHA.
+
+The trusted workflow template must exist on both the AxionRide `main` and `develop` branches so the trusted `main` dispatch is available and the repository keeps its workflow branches synchronized. After reviewing this template, copy it into a working tree for each branch and commit it through the normal Git process; this bot does not perform those copies or commits.

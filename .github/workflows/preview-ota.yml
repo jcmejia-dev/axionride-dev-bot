@@ -11,6 +11,10 @@ on:
         description: Optional safe preview changelog notes
         required: false
         type: string
+      target_branch:
+        description: Validated branch to publish; develop for the standard preview command
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -19,10 +23,30 @@ jobs:
   preview-ota:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out develop
+      - name: Validate target branch
+        env:
+          TARGET_BRANCH: ${{ inputs.target_branch }}
+        shell: bash
+        run: |
+          if [ "$TARGET_BRANCH" = "develop" ]; then
+            exit 0
+          fi
+          if [[ ! "$TARGET_BRANCH" =~ ^(design|feature|fix)/[a-z0-9._/-]+$ ]] || [[ "$TARGET_BRANCH" == *..* ]]; then
+            echo "Invalid target branch. Only develop or validated design/, feature/, and fix/ branches are supported."
+            exit 1
+          fi
+
+      - name: Check out validated target branch
         uses: actions/checkout@v4
         with:
-          ref: develop
+          ref: ${{ inputs.target_branch }}
+
+      - name: Record published commit
+        id: published
+        shell: bash
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -50,13 +74,17 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           OTA_MESSAGE: ${{ inputs.message }}
           JOB_STATUS: ${{ job.status }}
-          COMMIT_SHA: ${{ github.sha }}
+          TARGET_BRANCH: ${{ inputs.target_branch }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+          PUBLISHED_SHA: ${{ steps.published.outputs.sha }}
           RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
         shell: bash
         run: |
-          if [ "$JOB_STATUS" = "success" ]; then RESULT="✅ Preview OTA published"; else RESULT="❌ Preview OTA failed"; fi
-          payload=$(jq -n --arg title "$RESULT" --arg message "$OTA_MESSAGE" --arg sha "$COMMIT_SHA" --arg url "$RUN_URL" \
-            '{embeds:[{title:$title,color:16742912,fields:[{name:"OTA message",value:$message},{name:"Commit SHA",value:$sha},{name:"GitHub Actions run",value:$url}]}]}')
+          if [ "$TARGET_BRANCH" = "develop" ]; then KIND="Preview OTA"; else KIND="Preview Branch OTA"; fi
+          if [ "$JOB_STATUS" = "success" ]; then RESULT="✅ $KIND published"; SHA="$PUBLISHED_SHA"; else RESULT="❌ $KIND failed"; SHA="not published"; fi
+          notes="$RELEASE_NOTES"; if [ -z "$notes" ]; then notes="$OTA_MESSAGE"; fi
+          payload=$(jq -n --arg title "$RESULT" --arg branch "$TARGET_BRANCH" --arg message "$OTA_MESSAGE" --arg notes "$notes" --arg sha "$SHA" --arg url "$RUN_URL" \
+            '{embeds:[{title:$title,description:"Android Preview testing only — never a production release.",color:16742912,fields:[{name:"Branch",value:$branch},{name:"OTA message",value:$message},{name:"Release notes",value:$notes},{name:"Published commit SHA",value:$sha},{name:"GitHub Actions run",value:$url}]}]}')
           curl --fail-with-body --silent --show-error -H "Content-Type: application/json" -d "$payload" "$DISCORD_WEBHOOK_URL"
 
       - name: Post successful preview changelog
@@ -65,7 +93,8 @@ jobs:
           DISCORD_CHANGELOG_WEBHOOK_URL: ${{ secrets.DISCORD_CHANGELOG_WEBHOOK_URL }}
           OTA_MESSAGE: ${{ inputs.message }}
           RELEASE_NOTES: ${{ inputs.release_notes }}
-          COMMIT_SHA: ${{ github.sha }}
+          TARGET_BRANCH: ${{ inputs.target_branch }}
+          SHORT_SHA: ${{ steps.published.outputs.short_sha }}
           RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
           EAS_PROJECT_URL: ${{ vars.EAS_PROJECT_URL }}
         shell: bash
@@ -76,12 +105,12 @@ jobs:
           fi
           notes="$RELEASE_NOTES"
           if [ -z "$notes" ]; then notes="$OTA_MESSAGE"; fi
-          short_sha="${COMMIT_SHA:0:7}"
           timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           eas_field='[]'
           case "$EAS_PROJECT_URL" in
             https://*) eas_field=$(jq -n --arg url "$EAS_PROJECT_URL" '[{name:"EAS project / update results",value:$url}]') ;;
           esac
-          payload=$(jq -n --arg message "$OTA_MESSAGE" --arg notes "$notes" --arg sha "$short_sha" --arg url "$RUN_URL" --arg timestamp "$timestamp" --argjson eas "$eas_field" \
-            '{embeds:[{title:"AxionRide Preview Update",description:"Preview OTA for testers — this is not a public Play Store release.",color:16742912,timestamp:$timestamp,fields:([{name:"OTA message",value:$message},{name:"What changed",value:$notes},{name:"Commit",value:$sha,inline:true},{name:"Branch",value:"develop",inline:true},{name:"Platform",value:"Android Preview",inline:true},{name:"GitHub Actions run",value:$url}] + $eas)}]}')
+          if [ "$TARGET_BRANCH" = "develop" ]; then TITLE="AxionRide Preview Update"; else TITLE="AxionRide Branch Preview"; fi
+          payload=$(jq -n --arg title "$TITLE" --arg branch "$TARGET_BRANCH" --arg message "$OTA_MESSAGE" --arg notes "$notes" --arg sha "$SHORT_SHA" --arg url "$RUN_URL" --arg timestamp "$timestamp" --argjson eas "$eas_field" \
+            '{embeds:[{title:$title,description:"Android Preview testing only — this is not a public Play Store release.",color:16742912,timestamp:$timestamp,fields:([{name:"Branch",value:$branch},{name:"OTA message",value:$message},{name:"What changed",value:$notes},{name:"Commit",value:$sha,inline:true},{name:"Platform",value:"Android Preview",inline:true},{name:"GitHub Actions run",value:$url}] + $eas)}]}')
           curl --fail-with-body --silent --show-error -H "Content-Type: application/json" -d "$payload" "$DISCORD_CHANGELOG_WEBHOOK_URL"

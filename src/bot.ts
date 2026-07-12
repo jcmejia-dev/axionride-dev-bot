@@ -5,9 +5,9 @@ import {
 import type { Config } from "./config.js";
 import { LocalCodexRunner, taskDuration, type CodexTask } from "./codex-runner.js";
 import { buildAxionEmbed, formatSafeStatus } from "./embeds.js";
-import { dispatchPreviewOta } from "./github.js";
+import { dispatchBranchPreviewOta, dispatchPreviewOta, remoteBranchExists } from "./github.js";
 import { createDiscordPromptHistory, type PromptHistoryManager } from "./prompt-history.js";
-import { isAuthorized, OtaRequestGuard, validateCodexPrompt, validateOtaMessage, validateReleaseNotes } from "./security.js";
+import { isAuthorized, OtaRequestGuard, validateCodexPrompt, validateOtaMessage, validatePreviewBranch, validateReleaseNotes } from "./security.js";
 import { buildSystemStatusEmbed, SystemStatusManager } from "./system-status.js";
 import { AIOperationsController } from "./ai-operations.js";
 
@@ -63,6 +63,31 @@ async function handleCommand(
   promptHistory: PromptHistoryManager,
   getLast: () => string | undefined, setLast: (message: string) => void,
 ) {
+  if (interaction.commandName === "ota-branch") {
+    let branch: string; let message: string; let releaseNotes: string | undefined;
+    try {
+      branch = validatePreviewBranch(interaction.options.getString("branch", true));
+      message = validateOtaMessage(interaction.options.getString("message", true));
+      const supplied = interaction.options.getString("release_notes"); releaseNotes = supplied ? validateReleaseNotes(supplied) : undefined;
+    } catch (error) { await interaction.reply({ content: error instanceof Error ? error.message : "Invalid branch preview request.", ephemeral: true }); return; }
+    let release: () => void;
+    try { release = guard.acquire(interaction.user.id); }
+    catch (error) { await interaction.reply({ content: error instanceof Error ? error.message : "Request blocked.", ephemeral: true }); return; }
+    await interaction.deferReply({ ephemeral: true });
+    const github = { token: config.GITHUB_TOKEN, owner: config.GITHUB_OWNER, repo: config.GITHUB_REPO, workflowFile: config.GITHUB_WORKFLOW_FILE, branch: config.GITHUB_BRANCH };
+    try {
+      if (!await remoteBranchExists(github, branch)) { await interaction.editReply(`Remote branch was not found: ${branch}. Commit and push it before requesting a branch preview OTA.`); return; }
+      await dispatchBranchPreviewOta(github, branch, message, releaseNotes);
+    } finally { release(); }
+    const actionsButton = new ActionRowBuilder<ButtonBuilder>().addComponents(new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel("Open Actions").setURL(config.GITHUB_ACTIONS_URL));
+    await interaction.editReply({ content: `Branch preview OTA queued.\nBranch: ${branch}\nMessage: ${message}`, components: [actionsButton] });
+    const channel = await interaction.client.channels.fetch(config.DISCORD_BUILD_STATUS_CHANNEL_ID);
+    if (channel?.type === ChannelType.GuildText) await channel.send({ embeds: [buildAxionEmbed("🚀 Preview Branch OTA requested", [
+      { name: "Branch", value: branch }, { name: "Message", value: message }, { name: "Release notes", value: releaseNotes ?? message },
+      { name: "Discord user", value: `${interaction.user.tag} (${interaction.user.id})` }, { name: "GitHub Actions", value: config.GITHUB_ACTIONS_URL },
+    ]).setFooter({ text: "Android Preview testing only. This does not merge, push, build an APK, or publish production." })] });
+    return;
+  }
   if (interaction.commandName === "ota-preview") {
     let message: string;
     let releaseNotes: string | undefined;

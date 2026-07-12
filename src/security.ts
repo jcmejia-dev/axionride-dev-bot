@@ -27,6 +27,14 @@ export function validateReleaseNotes(value: string): string {
   return notes;
 }
 
+export function validatePreviewBranch(value: string): string {
+  const branch = value.trim();
+  if (branch.includes("..") || !/^(?:design|feature|fix)\/[a-z0-9._/-]+$/.test(branch)) {
+    throw new Error("Branch must start with design/, feature/, or fix/ and contain only lowercase letters, numbers, dots, underscores, hyphens, and slashes.");
+  }
+  return branch;
+}
+
 export class OtaRequestGuard {
   private readonly lastRequest = new Map<string, number>();
   private dispatching = false;
