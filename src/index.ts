@@ -1,7 +1,17 @@
 import { createBot } from "./bot.js";
 import { loadConfig } from "./config.js";
 import { startHealthServer } from "./health.js";
+import express from "express";
 
+const app = express();
+
+app.get("/", (req, res) => {
+  res.send("AxionRide Bot is alive 🚀");
+});
+
+app.listen(process.env.PORT || 3000, () => {
+  console.log("Web server running");
+});
 async function main() {
   const config = loadConfig();
   startHealthServer(config.PORT);
